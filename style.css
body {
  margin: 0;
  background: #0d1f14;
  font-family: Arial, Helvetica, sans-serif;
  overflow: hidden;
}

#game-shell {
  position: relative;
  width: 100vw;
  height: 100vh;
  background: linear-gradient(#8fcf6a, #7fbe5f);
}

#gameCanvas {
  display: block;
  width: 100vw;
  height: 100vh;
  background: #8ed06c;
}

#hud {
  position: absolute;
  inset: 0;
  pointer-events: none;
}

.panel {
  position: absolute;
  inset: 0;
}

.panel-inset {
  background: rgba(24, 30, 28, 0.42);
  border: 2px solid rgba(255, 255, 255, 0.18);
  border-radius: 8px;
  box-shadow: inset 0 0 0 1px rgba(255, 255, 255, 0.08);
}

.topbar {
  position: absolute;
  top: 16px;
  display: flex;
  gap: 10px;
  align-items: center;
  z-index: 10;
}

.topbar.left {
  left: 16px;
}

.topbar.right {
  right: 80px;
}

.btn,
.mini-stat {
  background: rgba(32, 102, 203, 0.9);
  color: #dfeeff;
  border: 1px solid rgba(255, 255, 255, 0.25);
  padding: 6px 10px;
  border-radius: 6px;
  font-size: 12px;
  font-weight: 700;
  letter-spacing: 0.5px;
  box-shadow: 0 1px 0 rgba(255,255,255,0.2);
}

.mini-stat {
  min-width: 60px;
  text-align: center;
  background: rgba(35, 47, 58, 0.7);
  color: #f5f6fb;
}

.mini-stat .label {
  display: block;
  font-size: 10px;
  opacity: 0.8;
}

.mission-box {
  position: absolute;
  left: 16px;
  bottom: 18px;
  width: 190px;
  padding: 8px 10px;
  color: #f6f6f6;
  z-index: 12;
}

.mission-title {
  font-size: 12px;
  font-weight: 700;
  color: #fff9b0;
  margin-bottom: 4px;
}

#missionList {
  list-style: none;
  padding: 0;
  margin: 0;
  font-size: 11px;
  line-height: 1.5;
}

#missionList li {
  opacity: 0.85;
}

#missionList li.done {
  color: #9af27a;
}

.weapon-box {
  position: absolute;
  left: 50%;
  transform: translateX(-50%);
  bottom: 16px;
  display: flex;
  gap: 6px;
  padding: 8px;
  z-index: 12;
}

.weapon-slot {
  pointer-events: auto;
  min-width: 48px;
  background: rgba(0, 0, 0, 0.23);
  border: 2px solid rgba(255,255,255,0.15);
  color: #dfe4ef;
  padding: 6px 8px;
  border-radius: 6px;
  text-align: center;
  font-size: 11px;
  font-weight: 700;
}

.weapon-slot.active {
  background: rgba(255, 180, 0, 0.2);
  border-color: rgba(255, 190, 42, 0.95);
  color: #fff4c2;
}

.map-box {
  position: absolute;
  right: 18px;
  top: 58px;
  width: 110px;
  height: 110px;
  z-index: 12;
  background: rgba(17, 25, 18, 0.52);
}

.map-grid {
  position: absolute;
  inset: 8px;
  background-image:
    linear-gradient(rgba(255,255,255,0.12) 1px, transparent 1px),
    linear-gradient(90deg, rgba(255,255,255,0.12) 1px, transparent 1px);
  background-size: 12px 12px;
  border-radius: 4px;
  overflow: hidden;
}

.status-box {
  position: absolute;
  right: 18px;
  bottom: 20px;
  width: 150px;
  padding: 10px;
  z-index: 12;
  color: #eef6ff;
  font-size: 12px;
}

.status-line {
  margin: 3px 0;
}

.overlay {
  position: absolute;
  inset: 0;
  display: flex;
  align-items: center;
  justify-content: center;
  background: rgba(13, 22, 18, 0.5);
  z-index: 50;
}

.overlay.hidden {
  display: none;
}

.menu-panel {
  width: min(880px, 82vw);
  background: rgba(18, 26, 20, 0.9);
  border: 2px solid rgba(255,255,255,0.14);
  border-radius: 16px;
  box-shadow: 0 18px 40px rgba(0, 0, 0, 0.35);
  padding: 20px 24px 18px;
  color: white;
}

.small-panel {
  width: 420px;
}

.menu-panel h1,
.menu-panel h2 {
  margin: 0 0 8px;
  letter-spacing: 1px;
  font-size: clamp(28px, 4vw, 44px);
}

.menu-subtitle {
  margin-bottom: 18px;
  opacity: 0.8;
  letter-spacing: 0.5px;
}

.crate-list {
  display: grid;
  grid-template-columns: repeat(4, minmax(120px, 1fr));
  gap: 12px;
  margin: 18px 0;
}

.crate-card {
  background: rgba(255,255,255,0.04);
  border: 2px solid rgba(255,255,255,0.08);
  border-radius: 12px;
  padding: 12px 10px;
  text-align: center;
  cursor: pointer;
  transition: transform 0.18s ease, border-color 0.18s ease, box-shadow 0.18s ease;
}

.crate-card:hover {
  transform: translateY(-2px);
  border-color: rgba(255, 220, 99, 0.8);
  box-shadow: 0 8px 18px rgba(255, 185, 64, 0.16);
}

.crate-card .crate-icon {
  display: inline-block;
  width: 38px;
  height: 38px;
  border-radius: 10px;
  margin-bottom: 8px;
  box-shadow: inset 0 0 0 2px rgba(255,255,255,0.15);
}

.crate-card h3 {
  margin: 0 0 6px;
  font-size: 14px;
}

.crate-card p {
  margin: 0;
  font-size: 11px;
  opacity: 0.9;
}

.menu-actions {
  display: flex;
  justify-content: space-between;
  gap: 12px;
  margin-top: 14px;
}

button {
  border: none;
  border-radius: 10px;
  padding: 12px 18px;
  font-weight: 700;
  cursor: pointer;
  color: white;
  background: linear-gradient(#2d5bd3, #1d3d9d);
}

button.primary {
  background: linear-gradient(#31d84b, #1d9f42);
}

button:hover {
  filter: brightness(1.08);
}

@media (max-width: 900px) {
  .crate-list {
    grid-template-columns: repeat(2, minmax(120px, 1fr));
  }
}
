@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delta Strike Arena</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="game-shell">
+      <canvas id="gameCanvas" width="1280" height="720"></canvas>
+
+      <div id="hud" class="panel">
+        <div class="topbar left">
+          <div class="btn small">View Match Stats</div>
+        </div>
+
+        <div class="topbar right">
+          <div class="mini-stat">
+            <span class="label">HP</span>
+            <span id="hpValue">100</span>
+          </div>
+          <div class="mini-stat">
+            <span class="label">Armor</span>
+            <span id="armorValue">0</span>
+          </div>
+          <div class="mini-stat">
+            <span class="label">Kills</span>
+            <span id="killValue">0</span>
+          </div>
+        </div>
+
+        <div id="missionPanel" class="mission-box panel-inset">
+          <div class="mission-title">任务</div>
+          <ul id="missionList"></ul>
+        </div>
+
+        <div id="weaponPanel" class="weapon-box panel-inset">
+          <div class="weapon-slot active" data-slot="0">P90</div>
+          <div class="weapon-slot" data-slot="1">AR</div>
+          <div class="weapon-slot" data-slot="2">Sniper</div>
+          <div class="weapon-slot" data-slot="3">SG</div>
+        </div>
+
+        <div id="mapPanel" class="map-box panel-inset">
+          <div class="map-grid"></div>
+        </div>
+
+        <div id="statusPanel" class="status-box panel-inset">
+          <div class="status-line">Alive</div>
+          <div class="status-line">Ammo <span id="ammoValue">18</span></div>
+          <div class="status-line">Weapon <span id="weaponLabel">Pistol</span></div>
+        </div>
+      </div>
+
+      <div id="startMenu" class="overlay visible">
+        <div class="menu-panel">
+          <h1>Delta Strike Arena</h1>
+          <div class="menu-subtitle">Open 12 crate types and survive the zone</div>
+
+          <div id="crateList" class="crate-list"></div>
+
+          <div class="menu-actions">
+            <button id="openRandomBtn">Open Random Crate</button>
+            <button id="startBtn" class="primary">Start Match</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="gameOver" class="overlay hidden">
+        <div class="menu-panel small-panel">
+          <h2>Mission Failed</h2>
+          <p id="gameOverText">You were eliminated.</p>
+          <button id="restartBtn" class="primary">Retry</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="game.js"></script>
+  </body>
+</html>

@@ -1,0 +1,871 @@
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const startMenu = document.getElementById('startMenu');
+const gameOverOverlay = document.getElementById('gameOver');
+const missionList = document.getElementById('missionList');
+const crateList = document.getElementById('crateList');
+const hpValue = document.getElementById('hpValue');
+const armorValue = document.getElementById('armorValue');
+const killValue = document.getElementById('killValue');
+const ammoValue = document.getElementById('ammoValue');
+const weaponLabel = document.getElementById('weaponLabel');
+const gameOverText = document.getElementById('gameOverText');
+
+const world = { width: 2400, height: 1800 };
+const keys = {};
+const mouse = { x: canvas.width / 2, y: canvas.height / 2, down: false };
+
+const weaponCatalog = {
+  pistol: { name: 'Pistol', damage: 12, rate: 0.22, ammo: 18, maxAmmo: 18, color: '#ffdb65', fireSpeed: 540 },
+  rifle: { name: 'AR', damage: 18, rate: 0.11, ammo: 32, maxAmmo: 32, color: '#ff916a', fireSpeed: 620 },
+  sniper: { name: 'Sniper', damage: 70, rate: 0.8, ammo: 6, maxAmmo: 6, color: '#9e8cff', fireSpeed: 950 },
+  shotgun: { name: 'Shotgun', damage: 14, rate: 0.55, ammo: 8, maxAmmo: 8, color: '#9de4ff', fireSpeed: 360 }
+};
+
+const crateTemplates = [
+  { name: 'Common', icon: '#bfc0b5', loot: 'coins', rarity: 'common' },
+  { name: 'Ammo', icon: '#ff6e3a', loot: 'ammo', rarity: 'common' },
+  { name: 'Medkit', icon: '#7de26d', loot: 'med', rarity: 'common' },
+  { name: 'Armor', icon: '#58b7ff', loot: 'armor', rarity: 'rare' },
+  { name: 'Rifle', icon: '#ffb117', loot: 'weapon', rarity: 'rare' },
+  { name: 'Sniper', icon: '#c074ff', loot: 'weapon', rarity: 'epic' },
+  { name: 'Grenade', icon: '#ff4d8f', loot: 'grenade', rarity: 'rare' },
+  { name: 'Energy', icon: '#47d4d9', loot: 'energy', rarity: 'rare' },
+  { name: 'Gold', icon: '#f5d55e', loot: 'coins', rarity: 'epic' },
+  { name: 'Boss Key', icon: '#ff5858', loot: 'key', rarity: 'legendary' },
+  { name: 'Elite', icon: '#661fff', loot: 'weapon', rarity: 'legendary' },
+  { name: 'Supply', icon: '#8fbf58', loot: 'supply', rarity: 'common' }
+];
+
+let gameState = 'menu';
+let lastTime = 0;
+let fireCooldown = 0;
+let kills = 0;
+let mapTimer = 0;
+
+const player = {
+  x: 340,
+  y: 1040,
+  radius: 17,
+  speed: 260,
+  health: 100,
+  armor: 0,
+  angle: 0,
+  weapon: 'pistol',
+  inventory: { ammo: 120, medkits: 2, grenades: 2, coins: 0, keys: 0 },
+  weaponsUnlocked: ['pistol', 'rifle', 'sniper', 'shotgun'],
+  aimMode: 'normal',
+  cameraX: 0,
+  cameraY: 0,
+  reloadTimer: 0,
+  ammoInMag: 18,
+  isReloading: false,
+  lastWeaponIndex: 0
+};
+
+const bullets = [];
+const enemyBullets = [];
+const enemies = [];
+const crates = [];
+const particles = [];
+const obstacles = [];
+const missionListData = [
+  { text: 'Collect 3 crates', done: false },
+  { text: 'Defeat 5 enemies', done: false },
+  { text: 'Take down the boss', done: false },
+  { text: 'Reach extraction', done: false }
+];
+
+const boss = {
+  x: 1900,
+  y: 400,
+  radius: 36,
+  health: 400,
+  maxHealth: 400,
+  fireCooldown: 0,
+  active: true
+};
+
+function randomRange(min, max) {
+  return Math.random() * (max - min) + min;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function buildMap() {
+  obstacles.length = 0;
+
+  const buildingRects = [
+    { x: 760, y: 420, w: 380, h: 300 },
+    { x: 160, y: 1120, w: 220, h: 230 },
+    { x: 1220, y: 980, w: 320, h: 220 },
+    { x: 1500, y: 420, w: 260, h: 210 },
+    { x: 880, y: 1160, w: 260, h: 240 },
+    { x: 370, y: 350, w: 180, h: 150 }
+  ];
+
+  for (const rect of buildingRects) {
+    obstacles.push({ type: 'building', ...rect });
+  }
+
+  const trees = [
+    { x: 185, y: 270, r: 28 }, { x: 610, y: 230, r: 22 }, { x: 1040, y: 240, r: 30 }, { x: 1770, y: 260, r: 26 },
+    { x: 2205, y: 420, r: 28 }, { x: 2060, y: 1040, r: 32 }, { x: 1220, y: 600, r: 24 }, { x: 600, y: 1440, r: 28 },
+    { x: 1400, y: 1480, r: 30 }, { x: 1850, y: 1420, r: 24 }, { x: 2100, y: 1540, r: 30 }, { x: 300, y: 640, r: 22 }
+  ];
+
+  for (const tree of trees) {
+    obstacles.push({ type: 'tree', x: tree.x, y: tree.y, r: tree.r });
+  }
+
+  const rocks = [
+    { x: 980, y: 840, r: 18 }, { x: 780, y: 920, r: 14 }, { x: 1680, y: 990, r: 18 }, { x: 1340, y: 1230, r: 16 }
+  ];
+
+  for (const rock of rocks) {
+    obstacles.push({ type: 'rock', x: rock.x, y: rock.y, r: rock.r });
+  }
+}
+
+function createCrates() {
+  crates.length = 0;
+  for (let i = 0; i < 26; i++) {
+    const template = crateTemplates[Math.floor(Math.random() * crateTemplates.length)];
+    const x = randomRange(120, world.width - 120);
+    const y = randomRange(120, world.height - 120);
+    const safe = !isPositionBlocked(x, y, 24);
+
+    if (!safe) continue;
+
+    crates.push({
+      x, y, r: 18,
+      name: template.name,
+      color: template.icon,
+      loot: template.loot,
+      opened: false,
+      pulse: Math.random() * Math.PI * 2
+    });
+  }
+}
+
+function createEnemies() {
+  enemies.length = 0;
+  for (let i = 0; i < 13; i++) {
+    enemies.push({
+      x: randomRange(200, world.width - 200),
+      y: randomRange(200, world.height - 200),
+      radius: 14,
+      health: 45,
+      speed: 100 + Math.random() * 30,
+      color: i % 2 === 0 ? '#d9534f' : '#8c97ff',
+      attackCooldown: 0,
+      alive: true
+    });
+  }
+}
+
+function resetGame() {
+  player.x = 340;
+  player.y = 1040;
+  player.health = 100;
+  player.armor = 0;
+  player.weapon = 'pistol';
+  player.aimMode = 'normal';
+  player.ammoInMag = weaponCatalog.pistol.ammo;
+  player.inventory.ammo = 120;
+  player.inventory.medkits = 2;
+  player.inventory.grenades = 2;
+  player.inventory.coins = 0;
+  player.inventory.keys = 0;
+  player.weaponsUnlocked = ['pistol', 'rifle', 'sniper', 'shotgun'];
+  bullets.length = 0;
+  enemyBullets.length = 0;
+  particles.length = 0;
+  kills = 0;
+  mapTimer = 0;
+  boss.health = boss.maxHealth;
+  boss.active = true;
+  buildMap();
+  createCrates();
+  createEnemies();
+  updateMissionUI();
+  updatePlayerHud();
+}
+
+function isPositionBlocked(x, y, radius) {
+  for (const o of obstacles) {
+    if (o.type === 'building') {
+      const nearestX = clamp(x, o.x, o.x + o.w);
+      const nearestY = clamp(y, o.y, o.y + o.h);
+      const dx = x - nearestX;
+      const dy = y - nearestY;
+      if (dx * dx + dy * dy < radius * radius) return true;
+    } else if (o.type === 'tree' || o.type === 'rock') {
+      const dx = x - o.x;
+      const dy = y - o.y;
+      if (dx * dx + dy * dy < (radius + o.r) * (radius + o.r)) return true;
+    }
+  }
+  return false;
+}
+
+function updatePlayerHud() {
+  hpValue.textContent = Math.ceil(player.health);
+  armorValue.textContent = Math.ceil(player.armor);
+  killValue.textContent = kills;
+  ammoValue.textContent = `${player.ammoInMag}/${player.inventory.ammo}`;
+  weaponLabel.textContent = weaponCatalog[player.weapon].name;
+
+  document.querySelectorAll('.weapon-slot').forEach((slot, index) => {
+    const isActive = index === player.lastWeaponIndex;
+    slot.classList.toggle('active', isActive);
+  });
+}
+
+function updateMissionUI() {
+  missionList.innerHTML = '';
+  missionListData.forEach((mission) => {
+    const li = document.createElement('li');
+    li.textContent = mission.text;
+    if (mission.done) li.classList.add('done');
+    missionList.appendChild(li);
+  });
+}
+
+function renderCrateMenu() {
+  crateList.innerHTML = '';
+  crateTemplates.forEach((crate) => {
+    const card = document.createElement('div');
+    card.className = 'crate-card';
+    card.innerHTML = `
+      <span class="crate-icon" style="background:${crate.icon};"></span>
+      <h3>${crate.name}</h3>
+      <p>${crate.rarity}</p>
+    `;
+    card.addEventListener('click', () => {
+      const rewards = ['ammo', 'medkit', 'armor', 'coins', 'rifle', 'sniper', 'grenade', 'supply'];
+      const reward = rewards[Math.floor(Math.random() * rewards.length)];
+      if (reward === 'ammo') player.inventory.ammo += 30;
+      if (reward === 'medkit') player.inventory.medkits += 1;
+      if (reward === 'armor') player.armor = Math.min(player.armor + 20, 100);
+      if (reward === 'coins') player.inventory.coins += 100;
+      if (reward === 'grenade') player.inventory.grenades += 1;
+      if (reward === 'supply') player.inventory.medkits += 1;
+      if (reward === 'rifle') player.weaponsUnlocked.push('rifle');
+      if (reward === 'sniper') player.weaponsUnlocked.push('sniper');
+      card.style.borderColor = '#ffd24d';
+      setTimeout(() => card.style.borderColor = '', 400);
+      updatePlayerHud();
+    });
+    crateList.appendChild(card);
+  });
+}
+
+renderCrateMenu();
+
+document.getElementById('openRandomBtn').addEventListener('click', () => {
+  const crate = crateTemplates[Math.floor(Math.random() * crateTemplates.length)];
+  const reward = crate.loot;
+  if (reward === 'ammo') player.inventory.ammo += 25;
+  if (reward === 'med') player.inventory.medkits += 1;
+  if (reward === 'armor') player.armor = Math.min(player.armor + 25, 100);
+  if (reward === 'coins') player.inventory.coins += 80;
+  if (reward === 'grenade') player.inventory.grenades += 1;
+  if (reward === 'weapon') {
+    const weaponChoices = ['rifle', 'sniper', 'shotgun'];
+    const chosen = weaponChoices[Math.floor(Math.random() * weaponChoices.length)];
+    if (!player.weaponsUnlocked.includes(chosen)) player.weaponsUnlocked.push(chosen);
+    player.weapon = chosen;
+  }
+  if (reward === 'supply') player.inventory.ammo += 22;
+  updatePlayerHud();
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  startMenu.classList.add('hidden');
+  gameState = 'playing';
+  resetGame();
+  updatePlayerHud();
+});
+
+document.getElementById('restartBtn').addEventListener('click', () => {
+  gameOverOverlay.classList.add('hidden');
+  startMenu.classList.remove('hidden');
+  gameState = 'menu';
+});
+
+document.querySelectorAll('.weapon-slot').forEach((slot) => {
+  slot.addEventListener('click', () => {
+    const index = Number(slot.dataset.slot);
+    const chosen = ['pistol', 'rifle', 'sniper', 'shotgun'][index];
+    if (player.weaponsUnlocked.includes(chosen)) {
+      player.weapon = chosen;
+      player.lastWeaponIndex = index;
+      player.ammoInMag = weaponCatalog[chosen].ammo;
+      updatePlayerHud();
+    }
+  });
+});
+
+window.addEventListener('keydown', (event) => {
+  keys[event.key.toLowerCase()] = true;
+  if (event.key.toLowerCase() === 'q') {
+    const order = ['pistol', 'rifle', 'sniper', 'shotgun'];
+    const index = order.indexOf(player.weapon);
+    const next = order[(index + 1) % order.length];
+    if (player.weaponsUnlocked.includes(next)) {
+      player.weapon = next;
+      player.lastWeaponIndex = order.indexOf(next);
+      player.ammoInMag = weaponCatalog[next].ammo;
+      updatePlayerHud();
+    }
+  }
+  if (event.key.toLowerCase() === 'e') {
+    const order = ['pistol', 'rifle', 'sniper', 'shotgun'];
+    const index = order.indexOf(player.weapon);
+    const prev = order[(index - 1 + order.length) % order.length];
+    if (player.weaponsUnlocked.includes(prev)) {
+      player.weapon = prev;
+      player.lastWeaponIndex = order.indexOf(prev);
+      player.ammoInMag = weaponCatalog[prev].ammo;
+      updatePlayerHud();
+    }
+  }
+  if (event.key.toLowerCase() === 'r') {
+    if (player.ammoInMag < weaponCatalog[player.weapon].maxAmmo && player.inventory.ammo > 0) {
+      player.isReloading = true;
+      player.reloadTimer = 0.7;
+    }
+  }
+  if (event.key.toLowerCase() === 'h' && player.inventory.medkits > 0) {
+    player.inventory.medkits -= 1;
+    player.health = clamp(player.health + 35, 0, 100);
+  }
+});
+
+window.addEventListener('keyup', (event) => {
+  keys[event.key.toLowerCase()] = false;
+});
+
+canvas.addEventListener('mousemove', (event) => {
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = (event.clientX - rect.left) * (canvas.width / rect.width);
+  mouse.y = (event.clientY - rect.top) * (canvas.height / rect.height);
+});
+
+canvas.addEventListener('mousedown', () => {
+  mouse.down = true;
+});
+
+window.addEventListener('mouseup', () => {
+  mouse.down = false;
+});
+
+function fireBullet(fromX, fromY, angle, damage, speed, owner) {
+  bullets.push({ x: fromX, y: fromY, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, damage, radius: 4, owner });
+}
+
+function shootPlayerWeapon() {
+  if (player.isReloading) return;
+  const weapon = weaponCatalog[player.weapon];
+  if (player.ammoInMag <= 0) {
+    player.isReloading = true;
+    player.reloadTimer = 0.7;
+    return;
+  }
+
+  const angle = Math.atan2(mouse.y - canvas.height / 2, mouse.x - canvas.width / 2);
+  const muzzleX = player.x - player.cameraX + Math.cos(angle) * 18;
+  const muzzleY = player.y - player.cameraY + Math.sin(angle) * 18;
+  if (player.weapon === 'shotgun') {
+    for (let i = -2; i <= 2; i++) {
+      const spread = angle + i * 0.17;
+      fireBullet(muzzleX, muzzleY, spread, weapon.damage, weapon.fireSpeed, 'player');
+    }
+  } else {
+    fireBullet(muzzleX, muzzleY, angle, weapon.damage, weapon.fireSpeed, 'player');
+  }
+
+  player.ammoInMag -= 1;
+  fireCooldown = weapon.rate;
+  updatePlayerHud();
+}
+
+function shootEnemy(enemy) {
+  const dx = player.x - enemy.x;
+  const dy = player.y - enemy.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const angle = Math.atan2(dy, dx);
+  enemyBullets.push({
+    x: enemy.x,
+    y: enemy.y,
+    vx: (dx / dist) * 270,
+    vy: (dy / dist) * 270,
+    radius: 4,
+    damage: 11
+  });
+}
+
+function handleMovement(dt) {
+  let moveX = 0;
+  let moveY = 0;
+  if (keys['w'] || keys['arrowup']) moveY -= 1;
+  if (keys['s'] || keys['arrowdown']) moveY += 1;
+  if (keys['a'] || keys['arrowleft']) moveX -= 1;
+  if (keys['d'] || keys['arrowright']) moveX += 1;
+
+  if (moveX !== 0 || moveY !== 0) {
+    const length = Math.hypot(moveX, moveY) || 1;
+    moveX /= length;
+    moveY /= length;
+    const nextX = player.x + moveX * player.speed * dt;
+    const nextY = player.y + moveY * player.speed * dt;
+    if (!isPositionBlocked(nextX, player.y, player.radius)) player.x = nextX;
+    if (!isPositionBlocked(player.x, nextY, player.radius)) player.y = nextY;
+  }
+
+  const angle = Math.atan2(mouse.y - canvas.height / 2, mouse.x - canvas.width / 2);
+  player.angle = angle;
+
+  player.cameraX = clamp(player.x - canvas.width / 2, 0, world.width - canvas.width);
+  player.cameraY = clamp(player.y - canvas.height / 2, 0, world.height - canvas.height);
+
+  if (mouse.down && fireCooldown <= 0) shootPlayerWeapon();
+}
+
+function handleReload(dt) {
+  if (!player.isReloading) return;
+  player.reloadTimer -= dt;
+  if (player.reloadTimer <= 0) {
+    const weapon = weaponCatalog[player.weapon];
+    const needed = weapon.maxAmmo - player.ammoInMag;
+    const taken = Math.min(needed, player.inventory.ammo);
+    player.inventory.ammo -= taken;
+    player.ammoInMag += taken;
+    player.isReloading = false;
+    updatePlayerHud();
+  }
+}
+
+function updateBullets(dt) {
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+
+    if (b.x < 0 || b.y < 0 || b.x > world.width || b.y > world.height) {
+      bullets.splice(i, 1);
+      continue;
+    }
+
+    let hit = false;
+    for (const obj of obstacles) {
+      if (obj.type === 'building') {
+        if (b.x > obj.x && b.x < obj.x + obj.w && b.y > obj.y && b.y < obj.y + obj.h) {
+          hit = true;
+          break;
+        }
+      }
+      if (obj.type === 'tree' || obj.type === 'rock') {
+        const dx = b.x - obj.x;
+        const dy = b.y - obj.y;
+        if (dx * dx + dy * dy < (obj.r + b.radius) * (obj.r + b.radius)) {
+          hit = true;
+          break;
+        }
+      }
+    }
+
+    if (hit) {
+      bullets.splice(i, 1);
+      continue;
+    }
+
+    if (b.owner === 'player') {
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        const e = enemies[j];
+        if (!e.alive) continue;
+        const dx = b.x - e.x;
+        const dy = b.y - e.y;
+        if (dx * dx + dy * dy < (e.radius + b.radius) * (e.radius + b.radius)) {
+          e.health -= b.damage;
+          bullets.splice(i, 1);
+          if (e.health <= 0) {
+            e.alive = false;
+            kills += 1;
+            particles.push({ x: e.x, y: e.y, life: 0.8, color: '#ffd27f', count: 14 });
+            missionListData[1].done = kills >= 5;
+            updateMissionUI();
+          }
+          break;
+        }
+      }
+
+      if (boss.active) {
+        const dx = b.x - boss.x;
+        const dy = b.y - boss.y;
+        if (dx * dx + dy * dy < (boss.radius + b.radius) * (boss.radius + b.radius)) {
+          boss.health -= b.damage;
+          bullets.splice(i, 1);
+          if (boss.health <= 0) {
+            boss.active = false;
+            missionListData[2].done = true;
+            updateMissionUI();
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    const b = enemyBullets[i];
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+
+    const dx = b.x - player.x;
+    const dy = b.y - player.y;
+    if (dx * dx + dy * dy < (player.radius + b.radius) * (player.radius + b.radius)) {
+      let damage = b.damage;
+      if (player.armor > 0) {
+        const absorbed = Math.min(player.armor, damage * 0.7);
+        player.armor -= absorbed;
+        damage -= absorbed;
+      }
+      player.health -= damage;
+      enemyBullets.splice(i, 1);
+      if (player.health <= 0) {
+        gameOverOverlay.classList.remove('hidden');
+        gameOverText.textContent = `Mission failed. You reached ${Math.round((player.x + player.y) / 30)} score.`;
+        gameState = 'gameover';
+      }
+      continue;
+    }
+
+    if (b.x < 0 || b.y < 0 || b.x > world.width || b.y > world.height || isPositionBlocked(b.x, b.y, b.radius)) {
+      enemyBullets.splice(i, 1);
+    }
+  }
+}
+
+function updateEnemies(dt) {
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+    const dx = player.x - enemy.x;
+    const dy = player.y - enemy.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    if (dist < 400) {
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const nextX = enemy.x + nx * enemy.speed * dt;
+      const nextY = enemy.y + ny * enemy.speed * dt;
+      if (!isPositionBlocked(nextX, enemy.y, enemy.radius)) enemy.x = nextX;
+      if (!isPositionBlocked(enemy.x, nextY, enemy.radius)) enemy.y = nextY;
+      enemy.attackCooldown -= dt;
+      if (dist < 250 && enemy.attackCooldown <= 0) {
+        shootEnemy(enemy);
+        enemy.attackCooldown = 1.2;
+      }
+    }
+  }
+
+  if (boss.active) {
+    const dx = player.x - boss.x;
+    const dy = player.y - boss.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    if (dist < 600) {
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const nextX = boss.x + nx * 100 * dt;
+      const nextY = boss.y + ny * 100 * dt;
+      if (!isPositionBlocked(nextX, boss.y, boss.radius)) boss.x = nextX;
+      if (!isPositionBlocked(boss.x, nextY, boss.radius)) boss.y = nextY;
+      boss.fireCooldown -= dt;
+      if (dist < 360 && boss.fireCooldown <= 0) {
+        const angle = Math.atan2(dy, dx);
+        enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 290, vy: Math.sin(angle) * 290, radius: 6, damage: 20 });
+        boss.fireCooldown = 1.2;
+      }
+    }
+  }
+}
+
+function updateCrates(dt) {
+  for (const crate of crates) {
+    crate.pulse += dt * 2;
+    const dist = Math.hypot(player.x - crate.x, player.y - crate.y);
+    if (!crate.opened && dist < 34) {
+      crate.opened = true;
+      player.inventory.coins += 30;
+      if (crate.name === 'Ammo') player.inventory.ammo += 25;
+      if (crate.name === 'Medkit') player.inventory.medkits += 1;
+      if (crate.name === 'Armor') player.armor = Math.min(player.armor + 25, 100);
+      if (crate.name === 'Rifle') player.weaponsUnlocked.push('rifle');
+      if (crate.name === 'Sniper') player.weaponsUnlocked.push('sniper');
+      if (crate.name === 'Grenade') player.inventory.grenades += 1;
+      if (crate.name === 'Energy') player.health = Math.min(player.health + 20, 100);
+      if (crate.name === 'Boss Key') player.inventory.keys += 1;
+      if (crate.name === 'Elite') player.weapon = 'shotgun';
+
+      particles.push({ x: crate.x, y: crate.y, life: 0.9, color: crate.color, count: 12 });
+      missionListData[0].done = true;
+      if (player.x > 1800 && boss.active) missionListData[3].done = true;
+      updateMissionUI();
+    }
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function update(dt) {
+  if (gameState !== 'playing') return;
+
+  mapTimer += dt;
+  fireCooldown = Math.max(0, fireCooldown - dt);
+  handleMovement(dt);
+  handleReload(dt);
+  updateEnemies(dt);
+  updateBullets(dt);
+  updateCrates(dt);
+  updateParticles(dt);
+  updatePlayerHud();
+
+  if (player.x > 2050 && player.y < 700 && boss.active) {
+    missionListData[3].done = true;
+    updateMissionUI();
+  }
+}
+
+function drawGround() {
+  ctx.fillStyle = '#9ad65e';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const offsetX = (player.cameraX % 80);
+  const offsetY = (player.cameraY % 80);
+  for (let x = -80; x < canvas.width + 80; x += 80) {
+    for (let y = -80; y < canvas.height + 80; y += 80) {
+      ctx.fillStyle = (Math.floor((x + offsetX) / 80) + Math.floor((y + offsetY) / 80)) % 2 === 0 ? '#9ed86d' : '#94cf64';
+      ctx.fillRect(x, y, 80, 80);
+    }
+  }
+}
+
+function drawWorld() {
+  ctx.save();
+  ctx.translate(-player.cameraX, -player.cameraY);
+
+  for (const o of obstacles) {
+    if (o.type === 'building') {
+      ctx.fillStyle = '#bb814d';
+      ctx.fillRect(o.x, o.y, o.w, o.h);
+      ctx.strokeStyle = '#8d5a34';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(o.x, o.y, o.w, o.h);
+      ctx.fillStyle = '#c0a25d';
+      for (let x = o.x + 20; x < o.x + o.w; x += 50) {
+        ctx.fillRect(x, o.y + 18, 24, 14);
+      }
+    }
+    if (o.type === 'tree') {
+      ctx.fillStyle = '#3a7d3b';
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (o.type === 'rock') {
+      ctx.fillStyle = '#6a6a6a';
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  for (const crate of crates) {
+    if (crate.opened) continue;
+    const size = 18 + Math.sin(crate.pulse) * 2;
+    ctx.fillStyle = crate.color;
+    ctx.fillRect(crate.x - size / 2, crate.y - size / 2, size, size);
+    ctx.strokeStyle = '#fff';
+    ctx.strokeRect(crate.x - size / 2, crate.y - size / 2, size, size);
+  }
+
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+    ctx.fillStyle = enemy.color;
+    ctx.beginPath();
+    ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.fillRect(enemy.x - 18, enemy.y - enemy.radius - 12, 36, 6);
+    ctx.fillStyle = '#d7ff5d';
+    ctx.fillRect(enemy.x - 18, enemy.y - enemy.radius - 12, 36 * (enemy.health / 45), 6);
+  }
+
+  if (boss.active) {
+    ctx.fillStyle = '#9d2b2b';
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.fillRect(boss.x - 40, boss.y - boss.radius - 18, 80, 9);
+    ctx.fillStyle = '#ffaf5f';
+    ctx.fillRect(boss.x - 40, boss.y - boss.radius - 18, 80 * (boss.health / boss.maxHealth), 9);
+  }
+
+  ctx.fillStyle = '#d9ddf8';
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(player.x, player.y);
+  ctx.lineTo(player.x + Math.cos(player.angle) * 20, player.y + Math.sin(player.angle) * 20);
+  ctx.stroke();
+
+  for (const b of bullets) {
+    ctx.fillStyle = '#ffd76d';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (const b of enemyBullets) {
+    ctx.fillStyle = '#ff5f63';
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (const p of particles) {
+    const alpha = clamp(p.life / 0.9, 0, 1);
+    ctx.fillStyle = p.color.replace(')', `, ${alpha})`).replace('rgb', 'rgba');
+    for (let i = 0; i < p.count; i++) {
+      const angle = (i / p.count) * Math.PI * 2 + p.life * 2;
+      const radius = 6 + i * 0.3;
+      ctx.beginPath();
+      ctx.arc(p.x + Math.cos(angle) * radius, p.y + Math.sin(angle) * radius, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawScope() {
+  if (player.weapon !== 'sniper') return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(canvas.width / 2, canvas.height / 2, 90, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(canvas.width / 2, 0);
+  ctx.lineTo(canvas.width / 2, canvas.height);
+  ctx.moveTo(0, canvas.height / 2);
+  ctx.lineTo(canvas.width, canvas.height / 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawMiniMap() {
+  const mapScale = 0.18;
+  const mapX = 1110;
+  const mapY = 52;
+
+  ctx.fillStyle = 'rgba(12,16,18,0.6)';
+  ctx.fillRect(mapX, mapY, 110, 110);
+  ctx.strokeStyle = '#dadcde';
+  ctx.strokeRect(mapX, mapY, 110, 110);
+
+  ctx.fillStyle = '#3aa437';
+  ctx.fillRect(mapX + 2, mapY + 2, 106, 106);
+
+  const sx = mapX + 5;
+  const sy = mapY + 5;
+  const w = 100;
+  const h = 100;
+
+  for (const o of obstacles) {
+    if (o.type === 'building') {
+      ctx.fillStyle = '#8a6a59';
+      ctx.fillRect(sx + o.x * mapScale, sy + o.y * mapScale, o.w * mapScale, o.h * mapScale);
+    }
+  }
+
+  for (const crate of crates) {
+    if (!crate.opened) {
+      ctx.fillStyle = '#ffd95e';
+      ctx.fillRect(sx + crate.x * mapScale, sy + crate.y * mapScale, 3, 3);
+    }
+  }
+
+  if (boss.active) {
+    ctx.fillStyle = '#F24F4F';
+    ctx.fillRect(sx + boss.x * mapScale, sy + boss.y * mapScale, 5, 5);
+  }
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(sx + player.x * mapScale, sy + player.y * mapScale, 5, 5);
+}
+
+function drawUI() {
+  ctx.fillStyle = 'rgba(10, 10, 10, 0.16)';
+  ctx.fillRect(15, 15, 180, 30);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px Arial';
+  ctx.fillText('View Match Stats', 26, 35);
+
+  ctx.fillStyle = 'rgba(8,12,13,0.6)';
+  ctx.fillRect(0, canvas.height - 42, canvas.width, 42);
+
+  const weapon = weaponCatalog[player.weapon];
+  ctx.fillStyle = '#f1f7ff';
+  ctx.font = 'bold 12px Arial';
+  ctx.fillText(`Loadout: ${weapon.name} | Ammo: ${player.ammoInMag}/${player.inventory.ammo}`, 32, canvas.height - 16);
+
+  ctx.fillStyle = 'rgba(11,11,11,0.5)';
+  ctx.fillRect(20, canvas.height - 70, 160, 18);
+  ctx.fillStyle = '#46d16d';
+  ctx.fillRect(20, canvas.height - 70, 160 * (player.health / 100), 18);
+
+  drawMiniMap();
+}
+
+function render() {
+  drawGround();
+  drawWorld();
+  drawScope();
+  drawUI();
+}
+
+function loop(timestamp) {
+  const dt = Math.min((timestamp - lastTime) / 1000 || 0.016, 0.033);
+  lastTime = timestamp;
+
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+resetGame();
+requestAnimationFrame(loop);
+
+window.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+});
+
+startMenu.classList.remove('hidden');
+render();
+
